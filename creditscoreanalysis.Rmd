@@ -1,0 +1,639 @@
+---
+title: "smatroja_21064444"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+plot(cars)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+```{r}
+
+```
+
+Importing necessary libraries for the project
+
+```{r}
+library(foreign)
+library(dplyr)
+library(data.table)
+library(ggplot2)
+library(corrplot)
+library(rstan)
+library(rstantools)
+library(brms)
+library(bayesplot)
+library(mediation)
+library(rpart)
+library(nnet)
+```
+
+Loading the dataset file (csv)
+The dataset was downloaded from openml website. The dataset is about the credit score whether it is good or bad absed on multiple parameters.
+
+```{r}
+data <- read.csv("creditscore.csv" , check.names = FALSE)
+colnames(data) <- gsub("\'", "", colnames(data))
+```
+
+```{r}
+head(data,10)
+```
+
+There are 1000 rows and 22 features in the dataset.
+
+```{r}
+dim(data)
+```
+
+```{r}
+str(data)
+```
+
+```{r}
+names(data)
+```
+
+```{r}
+summary(data)
+```
+
+```{r}
+
+```
+
+
+
+```{r}
+p1 <- ggplot(data, aes(x = checking_status, fill = 'Checking Status')) +
+  geom_bar(alpha = 0.9, color = '#C3073F', show.legend = FALSE) +
+  theme_minimal() +
+  labs(title = 'Checking Status', x = 'Checking Status', y = 'Count') +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1))
+
+
+
+# Print the plot
+print(p1)
+```
+
+
+```{r}
+# Plot for 'Purpose Distribution'
+p2 <- ggplot(data, aes(x = purpose, fill = 'Purpose Distribution')) +
+  geom_bar(alpha = 0.9, color = '#C3073F', show.legend = FALSE) +
+  theme_minimal() +
+  labs(title = 'Purpose Distribution', x = 'Purpose', y = 'Count') +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1))
+plot(p2)
+```
+
+```{r}
+# Distribution plot for 'duration'
+p1 <- ggplot(data, aes(x = duration)) +
+  geom_histogram(aes(y = ..density..), fill = '#34ebd8', color = 'black', bins = 30) +
+  geom_density(alpha = .2, fill = '#34ebd8') +
+  labs(title = 'Time Distribution', x = 'Duration', y = 'Density')
+
+
+print(p1)
+```
+
+
+```{r}
+# Distribution plot for 'credit_amount'
+p2 <- ggplot(data, aes(x = credit_amount)) +
+  geom_histogram(aes(y = ..density..), fill = '#34ebd8', color = 'black', bins = 30) +
+  geom_density(alpha = .2, fill = '#34ebd8') +
+  labs(title = 'Credit Amount Distribution', x = 'Credit Amount', y = 'Density')
+
+plot(p2)
+```
+
+```{r}
+# Distribution plot for 'age'
+p3 <- ggplot(data, aes(x = age)) +
+  geom_histogram(aes(y = ..density..), fill = '#34ebd8', color = 'black', bins = 30) +
+  geom_density(alpha = .2, fill = '#34ebd8') +
+  labs(title = 'Age Distribution', x = 'Age', y = 'Density')
+
+plot(p3)
+```
+Getting the columns having categorical data instead of integer
+
+```{r}
+categorical_cols <- sapply(data, is.character)
+categorical_col_names <- names(data)[categorical_cols]
+print(categorical_col_names)
+
+```
+Creating a new dataframe same as data and converting all the categorical values to integer using LabelEncoding.
+
+```{r}
+df_new <- data
+df_new[categorical_cols] <- lapply(data[categorical_cols], function(col) as.numeric(as.factor(col)) - 1)
+
+head(df_new, 10)
+```
+Fitting the model using glm to select the features based on p-value as there are 20 features
+Feature selection is necessary for this many features.
+
+```{r}
+formula = 'class ~ checking_status+duration+credit_history+purpose+credit_amount+savings_status+employment+installment_commitment+personal_status+other_parties+residence_since+property_magnitude+age+other_payment_plans+housing+existing_credits+job+num_dependents+own_telephone+foreign_worker'
+glm_full_model <- glm(formula = formula,
+                      family = binomial("logit"),
+                      data = df_new)
+summary(glm_full_model)
+```
+Based on the glm model analysis the features are selected. Again the glm is trained and then stepwise check is done to see the optimal features
+
+```{r}
+formula = 'class ~ checking_status+duration+purpose+credit_amount+savings_status+installment_commitment+personal_status+foreign_worker+credit_history+job+age'
+glm_selected_model <- glm(formula = formula,
+                         binomial(link="logit"),
+                      data = df_new)
+```
+
+
+```{r}
+stepwise_model <- step(glm_selected_model, direction = "both")
+summary(stepwise_model)
+```
+
+Based on the stepwise model the feature job is not needed as it is just increasing the AIC score.
+
+```{r}
+selected_columns <- c("checking_status", "duration", "credit_amount","purpose","savings_status", "installment_commitment", "personal_status","foreign_worker","credit_history","age","class")
+df_selected <- subset(df_new, select = selected_columns)
+head(df_selected)
+```
+Plotting the correlation matrix to know the relations between the features.
+
+```{r}
+
+cor_matrix <- cor(df_selected[, sapply(df_selected, is.numeric)], use = "complete.obs")
+
+corrplot(cor_matrix, method = "number", 
+         col = colorRampPalette(c("yellow", "blue", "red"))(10), 
+         number.cex = 0.5, 
+         tl.col = "black", tl.cex = 0.6, cl.cex = 0.6)
+```
+
+
+```{r}
+formula = 'class ~ checking_status+duration+purpose+credit_amount+savings_status+installment_commitment+personal_status+foreign_worker+age+credit_history'
+glm_selected_model <- glm(formula = formula,
+                      binomial(link="logit"),
+                      data = df_new)
+summary(glm_selected_model)
+```
+
+
+```{r}
+plot(glm_selected_model)
+```
+Mediation library is used to know mediators
+The Average Causal Mediation Effect (ACME) p-value is used to see if the feature is a potential mediator or not.
+The threshold value is < 0.005.
+
+```{r}
+
+features <- setdiff(names(df_selected), "class")
+
+potential_mediators <- data.frame(
+  Predictor = character(),
+  Mediator = character(),
+  ACME_p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (predictor in features) {
+  for (mediator in features) {
+    if (predictor != mediator) { 
+      mediator_model <- lm(as.formula(paste(mediator, "~", predictor)), data=df_selected)
+      outcome_model <- lm(as.formula(paste("class ~", predictor, "+", mediator)), data=df_selected)
+      med_analysis <- mediate(mediator_model, outcome_model, treat=predictor, mediator=mediator, robustSE = TRUE, sims=1000)
+      acme_p_value <- summary(med_analysis)$d0.p
+
+      if (!is.null(acme_p_value) && acme_p_value < 0.005) {
+        potential_mediators <- rbind(potential_mediators, data.frame(
+          Predictor = predictor,
+          Mediator = mediator,
+          ACME_p_value = acme_p_value
+        ))
+      }
+    }
+  }
+}
+
+print(potential_mediators)
+```
+
+Here p-value 0.000 means p-value < 0.001 as p-value = 0 is not possible.
+
+```{r}
+
+```
+    
+    The all potential mediators , though further analysis with correlation matrix is needed to be done
+
+
+```{r}
+
+```
+
+The potential mediators are found by adding the interaction term in the model.
+
+```{r}
+features <- setdiff(names(df_selected), "class")
+
+# GLM for each combination of features and check for interaction
+find_moderators <- function(data, features) {
+  moderators <- data.frame()
+  for (i in 1:(length(features) - 1)) {
+    for (j in (i + 1):length(features)) {
+      formula_str <- paste("class ~", features[i], "*", features[j])
+      model <- glm(as.formula(formula_str), family = "binomial", data = data)
+      summary_model <- summary(model)
+      
+      # Extract p-value for the interaction term
+      interaction_term <- paste(features[i], ":", features[j], sep = "")
+      p_value <- coef(summary_model)[interaction_term, "Pr(>|z|)"]
+      
+      # Check if the p-value is less than 0.05 and add to the moderators data frame if true
+      if (!is.na(p_value) && p_value < 0.05) {
+        moderators <- rbind(moderators, c(features[i], features[j], p_value))
+      }
+    }
+  }
+  colnames(moderators) <- c("Feature1", "Feature2", "P_Value")
+  return(moderators)
+}
+
+potential_moderators <- find_moderators(df_selected , features)
+
+# Print the potential moderators
+print(potential_moderators)
+```
+The potential confounders are found by checking the change in co-efficient by adding the potential confounder term.
+After getting potential confounder correlation matrix should be used to get the confounder.
+
+```{r}
+features <- setdiff(names(df_selected), "class")
+
+# Dataframe to store potential confounders
+potential_confounders <- data.frame(
+  Feature1 = character(),
+  Feature2 = character(),
+  CoeffChange = numeric(),
+  PercentChange = numeric(),
+  AICWithout = numeric(),
+  AICWith = numeric(),
+  AICChange = numeric(),
+  IsConfounder = logical(),
+  stringsAsFactors = FALSE
+)
+```
+
+
+```{r}
+# Loop over all features to check their confounding effect on each other
+for (feature1 in features) {
+  for (feature2 in features) {
+    if (feature1 != feature2) { 
+      # Fit the model with only feature1
+       formula1 <- as.formula(paste("class ~", feature1))
+      model1 <- glm(formula1, data = df_selected, family = "binomial")
+      coef1 <- coef(summary(model1))[feature1, "Estimate"]
+      aic1 <- AIC(model1)
+      
+      # Fit the model with both feature1 and feature2
+      formula2 <- as.formula(paste("class ~", feature1, "+", feature2))
+      model2 <- glm(formula2, data = df_selected, family = "binomial")
+      coef2 <- coef(summary(model2))[feature1, "Estimate"]
+      aic2 <- AIC(model2)
+      
+      # Calculate the change in the coefficient
+      change_in_coef <- abs(coef1 - coef2)
+      percent_change <- (change_in_coef / abs(coef1)) * 100
+      aic_change <- aic1 - aic2
+  
+      
+      # Check if the change is greater than 10% and AIC decrease
+      is_confounder <- percent_change > 10 && aic_change > 0
+      
+      if(is_confounder)
+      {
+        potential_confounders <- rbind(potential_confounders, data.frame(
+          Feature1 = feature1,
+          Feature2 = feature2,
+          CoeffChange = change_in_coef,
+          PercentChange = percent_change,
+          AICWithout = aic1,
+          AICWith = aic2,
+          AICChange = aic_change,
+          IsConfounder = is_confounder
+        ))
+      }
+    }
+  }
+}
+
+potential_confounders <- potential_confounders[order(-potential_confounders$AICChange),]
+
+# Display the potential confounders
+print(potential_confounders)
+
+```
+
+According to the  above results based on AIC change and change in coefficient of the predictor , the potential confounders are founded.
+But when looking to correlation matrix only confounder which looks prominent is duration a confounder of credit_amount.
+
+```{r}
+lm_confounder <- lm(class~duration,data=df_selected)
+summary(lm_confounder)
+```
+
+```{r}
+lm_with_confounder <- lm(class ~ credit_amount + duration , data=df_selected)
+summary(lm_with_confounder)
+```
+```{r}
+
+plot(df_selected$duration,df_selected$credit_amount)
+
+```
+The duration and credit_amount are highly correlated.
+
+```{r}
+df_new <- df_selected
+df_new$class <- as.factor(df_new$class)
+
+# Now create the plot
+p <- ggplot(df_new, aes(x=duration, y=credit_amount, color=class, shape=class)) +
+  geom_point() +  # Add the points
+  scale_color_manual(values=c("red", "blue")) +  # Define colors for the discrete values of 'class'
+  ggtitle('Correlation between Duration and Credit Amount') +
+  theme_minimal() +  # Use a minimal theme
+  theme(legend.position = "bottom")  # Place the legend at the bottom
+
+# Plot
+plot(p)
+
+```
+
+
+
+```{r}
+cor(df_selected$duration,df_selected$credit_amount)
+```
+
+As the duration and credit_amount are highly correlated the duration is confounder of credit_amount.
+
+
+```{r}
+head(df_selected)
+```
+
+Train the brms logistic regression model with 4 chains.
+
+```{r}
+brms_linear_reg_model <- brm(class ~ checking_status + duration + credit_amount + purpose + savings_status + installment_commitment + personal_status + foreign_worker + foreign_worker + age, 
+             family = bernoulli("logit"), 
+             data = df_selected, 
+             cores = 4,
+             chains = 4, 
+             iter = 2000, 
+             warmup = 1000,
+             seed = 12345)
+summary(brms_linear_reg_model)
+```
+
+
+```{r}
+columns_to_keep <- c("checking_status", "duration", "credit_amount","purpose","savings_status", "installment_commitment", "personal_status","foreign_worker","credit_history","age","class")
+df_logistic <- data
+df_logistic$class <- ifelse(df_logistic$class == "good", 1, 0)
+head(df_logistic,10)
+```
+
+Train the brms multilevel regression model with 4 chains.
+
+```{r}
+brms_multi_reg_model <- brm(class ~ (1|checking_status) + duration + credit_amount + (1|purpose) + (1|savings_status) + installment_commitment + (1|personal_status) + (1|foreign_worker) + age, 
+             family = bernoulli("logit"), 
+             data = df_logistic, 
+             cores = 4,
+             chains = 4, 
+             iter = 2000, 
+             warmup = 1000,
+             seed = 12345)
+summary(brms_multi_reg_model)
+```
+
+Checking the R2 score for both models.
+```{r}
+bayes_R2(brms_linear_reg_model)
+bayes_R2(brms_multi_reg_model)
+```
+
+
+```{r}
+loo_linear_reg_model <- loo(brms_linear_reg_model)
+print(loo_linear_reg_model)
+```
+
+```{r}
+loo_multi_reg_model <- loo(brms_multi_reg_model)
+print(loo_multi_reg_model)
+```
+
+Compare the loo values of both the models.
+
+```{r}
+loo_compare(loo_linear_reg_model,loo_multi_reg_model)
+```
+
+```{r}
+pp_check(brms_linear_reg_model)
+pp_check(brms_multi_reg_model)
+```
+
+Compare the WAIC values of both the models.
+
+```{r}
+WAIC(brms_linear_reg_model)
+WAIC(brms_multi_reg_model)
+```
+
+
+Train test split to know the accuracy, precision, recall and f1-score of the models
+
+```{r}
+set.seed(123)
+
+# Create an index to split the data into training (80%) and testing (20%)
+splitIndex <- sample(1:nrow(df_selected), size = floor(0.8 * nrow(df_selected)))
+
+# Create training and testing datasets
+train_data <- df_selected[splitIndex, ]
+test_data <- df_selected[-splitIndex, ]
+
+# Now fit the brms model on the training dataset
+brms_test_reg_model_train <- brm(class ~ checking_status + duration + credit_amount + purpose + savings_status + installment_commitment + personal_status + foreign_worker + foreign_worker + age, 
+             family = bernoulli("logit"), 
+             data = df_selected, 
+             cores = 4,
+             chains = 4, 
+             iter = 2000, 
+             warmup = 1000,
+             seed = 12345)
+
+# Summary of the model fitted on the training data
+summary(brms_test_reg_model_train)
+```
+
+```{r}
+pred_probabilities <- posterior_predict(brms_test_reg_model_train, newdata = test_data)
+pred_class <- apply(pred_probabilities, 2, function(x) {
+  ifelse(mean(x) > 0.5, 1, 0)
+})
+
+# Calculate accuracy
+actual_class <- test_data$class
+accuracy <- mean(pred_class == actual_class)
+print(paste("Accuracy on the test set:", accuracy))
+```
+```{r}
+# Assuming 'actual_class' contains the actual binary outcomes,
+# and 'pred_class' contains the predicted binary outcomes.
+
+# True Positives (TP): Predicted as 1 and actual is 1.
+TP <- sum(pred_class == 1 & actual_class == 1)
+
+# False Positives (FP): Predicted as 1 but actual is 0.
+FP <- sum(pred_class == 1 & actual_class == 0)
+
+# False Negatives (FN): Predicted as 0 but actual is 1.
+FN <- sum(pred_class == 0 & actual_class == 1)
+
+# Precision: TP / (TP + FP)
+precision <- TP / (TP + FP)
+
+# Recall: TP / (TP + FN)
+recall <- TP / (TP + FN)
+
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+print(paste("Precision:", precision))
+print(paste("Recall:", recall))
+print(paste("f1_score:", f1_score))
+```
+
+```{r}
+# Assuming 'data' is your original dataframe and contains a column named 'class' along with other features
+features <- c("checking_status", "duration", "credit_amount","purpose","savings_status", "installment_commitment", "personal_status","foreign_worker","credit_history","age","class")
+
+# Create a new dataframe with only the features of interest
+df_test_multilevel <- data[, features]
+df_test_multilevel$class <- ifelse(df_test_multilevel$class == "good", 1, 0)
+
+```
+
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Create indices for creating a training set (e.g., 80% of the data)
+train_indices <- sample(1:nrow(df_test_multilevel), size = floor(0.8 * nrow(df_test_multilevel)))
+
+# Split the data into training and testing sets
+train_data1 <- df_test_multilevel[train_indices, ]
+test_data1 <- df_test_multilevel[-train_indices, ]
+```
+
+```{r}
+brms_test_multi_reg_model <- brm(class ~ (1|checking_status) + duration + credit_amount + (1|purpose) + (1|savings_status) + installment_commitment + (1|personal_status) + (1|foreign_worker) + age, 
+             family = bernoulli("logit"), 
+             data = train_data1, 
+             cores = 4,
+             chains = 4, 
+             iter = 2000, 
+             warmup = 1000,
+             seed = 12345)
+summary(brms_test_multi_reg_model)
+```
+
+```{r}
+# Predict probabilities on the test set
+posterior_predictive <- posterior_predict(brms_test_multi_reg_model, newdata = test_data1)
+
+# Convert probabilities to class predictions using 0.5 threshold
+predicted_class <- apply(posterior_predictive, 2, function(x) {
+  ifelse(mean(x) > 0.5, 1, 0)
+})
+# Actual class values
+actual_class <- test_data1$class
+
+# Calculate accuracy
+accuracy <- mean(predicted_class == actual_class)
+print(paste("Accuracy on the test set:", accuracy))
+```
+```{r}
+# True Positives (TP): Predicted as 1 and actual is 1.
+TP <- sum(predicted_class == 1 & actual_class == 1)
+
+# False Positives (FP): Predicted as 1 but actual is 0.
+FP <- sum(predicted_class == 1 & actual_class == 0)
+
+# False Negatives (FN): Predicted as 0 but actual is 1.
+FN <- sum(predicted_class == 0 & actual_class == 1)
+
+# True Negatives (TN): Predicted as 0 and actual is 0.
+TN <- sum(predicted_class == 0 & actual_class == 0)
+
+# Precision: TP / (TP + FP)
+precision <- TP / (TP + FP)
+
+# Recall: TP / (TP + FN)
+recall <- TP / (TP + FN)
+
+# F1 Score: 2 * (precision * recall) / (precision + recall)
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Printing the metrics
+print(paste("Accuracy on the test set:", accuracy))
+print(paste("Precision:", precision))
+print(paste("Recall:", recall))
+print(paste("F1 Score:", f1_score))
+
+```
+Decision tree is fitted with the data to know how it performs on the dataset.
+
+```{r}
+train_tree <- train_data1
+test_tree <- test_data1
+decision_tree_model <- rpart(class ~ ., data = train_tree, method = "class")
+
+# Predict on the test data
+dt_predictions <- predict(decision_tree_model, newdata = test_tree, type = "class")
+
+# Calculate accuracy
+dt_accuracy <- mean(dt_predictions == test_tree$class)
+print(paste("Accuracy of Decision Tree on test set:", dt_accuracy))
+```
+
+
+
+
+
