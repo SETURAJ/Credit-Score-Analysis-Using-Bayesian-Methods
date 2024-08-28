@@ -1,0 +1,1 @@
+Assessing individuals’ creditworthiness is a critical function in the financial sector. Traditional credit scoring systems typically rely on naive approaches, providing single-point estimates that overlook uncertainty and important factors. This report introduces innovative Bayesian Statistical approach to credit score analysis. 
